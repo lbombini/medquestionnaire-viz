@@ -1,0 +1,444 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+pacman::p_load("here", "dplyr", "tidyr", "ggplot2", "paletteer", "readxl",
+               "patchwork", "sf", "stringr", "factoextra")
+here::i_am("medgenetics.Rproj")
+
+agelvls = c("до 29 років", "від 30 до 39 років", "від 40 до 49 років",
+            "від 50 до 59 років", "від 60 і старше")
+categorylvls = c("Вища", "Перша", "Друга", "Категорія відсутня")
+agreelvls = c("Так", "Більше так, ніж ні", "Не можу оцінити", "Більше ні, ніж так", "Ні")
+engagelvls = c("Так, беру активну\nучасть", "Так, знаю, але не\nзалучений(-на)", "Ні, не знаю але хочу\nбути залученим(-ною)")
+closedqlvls = c("Так", "Не впевнений(-на)", "Ні")
+attitudelvls = c("Надзвичайно позитивний", "Позитивний", "Нейтральний", "Негативний")
+
+positions = c("Інша", "Лікар-практик", "Керівник структурного підрозділу", "Науковець",
+              "Організатор охорони здоров’я", "Сестра медична", "Лікар-лаборант")
+specs = c("Інша", "Педіатр", "Терапевтична", "Сімейний лікар", "Хірургічна",
+          "Організатор охорони здоров’я")
+degrees = c("Відсутній", "Кандидат наук","Доктор наук")
+institutions = c("Інший варіант", "Державна", "Приватна", "Комунальна", "КНП")
+
+df <- read_xlsx(here("data/Комбінований результат - анкета опитування лікарів.xlsx"),
+                sheet = "new_colnames") %>% 
+  filter(!(position %in% c("Студент", "Тренер"))) %>% 
+  mutate(age = recode(factor(age, levels = agelvls), "до 29 років" = "<29 р.",
+                      "від 30 до 39 років" = "30-39 р.",
+                      "від 40 до 49 років" = "40-49 р.",
+                      "від 50 до 59 років" = "50-59 р.",
+                      "від 60 і старше" = "60<"),
+         region = gsub(" область", "", region),
+         region = gsub("м. ", "", region),
+         category = factor(category, levels = categorylvls),
+         position = factor(if_else(position %in% positions, position, "Інша"), levels = positions),
+         degree = if_else(degree %in% c("Кандидат наук", "доктор філософії PhD", "Аспірант"),
+                            "Кандидат наук", degree),
+         degree = factor(if_else(degree %in% degrees, degree, "Відсутній"), levels = degrees),
+         spec = factor(if_else(spec %in% specs, spec, "Інша"), levels = specs),
+         institutions = factor(if_else(institution %in% institutions, institution,
+                                       "Інший варіант"), levels = institutions),
+         `12_gentest_aware` = factor(`12_gentest_aware`, levels = agreelvls),
+         `13_pharmgen_aware` = factor(`13_pharmgen_aware`, levels = agreelvls),
+         `14_genetics_aware` = factor(`14_genetics_aware`, levels = agreelvls),
+         `15_gened` = factor(`15_gened`, levels = agreelvls),
+         `16_persmed_info` = factor(`16_persmed_info`, levels = agreelvls),
+         `17_engage_colleague` = factor(`17_engage_colleague`, levels = agreelvls),
+         `21_persmed_initiative_aware` = stringr::str_wrap(`21_persmed_initiative_aware`, width = 20),
+         `21_persmed_initiative_aware` = factor(`21_persmed_initiative_aware`, levels = engagelvls),
+         `22_persmed_initiative_engage` = factor(`22_persmed_initiative_engage`, levels = closedqlvls),
+         `23_persmed_training` = factor(`23_persmed_training`, levels = closedqlvls),
+         `26_persmed_costeffect` = replace_na(`26_persmed_costeffect`, "Нейтральний"),
+         `26_persmed_costeffect` = factor(`26_persmed_costeffect`, levels = attitudelvls),
+         `19_modern_priority` = gsub("допомоги, генетичних центрів та кількості штатних посад",
+                                     "допомоги та генетичних центрів; збільшення кількості штатних посад",
+                                     `19_modern_priority`))
+
+palette = c("#2D2926FF", "#33454EFF", "#537380FF", "#81A9ADFF", "#ECECECFF")
+palette = c("#EF7C12FF", "#FCA315FF", "#F4B95AFF", "#1BB6AFFF", "#088BBEFF", "#172869FF")
+rev_palette = rev(palette)
+
+```
+
+
+```{r agebar}
+agebar <- df %>% group_by(age, sex) %>%
+  summarize(n = n()) %>% 
+ggplot(aes(x = age, y = n, fill = sex)) + 
+  geom_col() +
+  #geom_text(aes(label = n), nudge_y = -2) +
+  scale_fill_manual(values = palette[c(2, 4, 5)],
+                         name = "Cтать",
+                         labels = c("Не вказано", "Жіноча", "Чоловіча")) +
+  #scale_fill_paletteer_d(palette = "LaCroixColoR::Orange") +
+  labs(x = NULL, y = NULL) +
+  theme_minimal()
+
+donut <- df %>% group_by(sex) %>% summarize(n = n()) %>%
+  mutate(perc = round(n / sum(n) * 100),
+         perc = ifelse(perc > 1, paste0(perc, "%"), "")) %>% 
+ggplot(aes(x = 2, y = n, fill = sex)) +
+  geom_col() +
+  scale_fill_manual(values = palette[c(2, 4, 5)]) +
+  #scale_fill_paletteer_d(palette = "LaCroixColoR::Orange") +
+  geom_text(aes(label = perc),
+            position = position_stack(vjust = 0.5), color = "white") +
+  annotate("text", x = 0.8, y = nrow(df) / 2, label = paste(nrow(df), "\nучасники"),
+           size = 4, colour = "grey30") +
+  coord_polar(theta = "y") +
+  theme_void() +
+  xlim(0.8, 2.5) +
+  theme(legend.position = "none")
+
+donut + agebar +
+  plot_annotation(tag_levels = 'A') 
+# ##ggsave("charts/age-pie-bar.png", units = "in", width = 8, height = 4, dpi = 600)
+
+ggsave("charts/age-pie-bar.pdf", device=cairo_pdf, width = 8, height = 4)
+
+```
+
+```{r map-number-respondents, fig.width=8 }
+shp <- read_sf(dsn = "data/ukraine_shp", layer = "ukr_admbnda_adm1_sspe_20240416")
+
+barn <- 
+  df %>% group_by(region) %>% summarize(n = n()) %>% 
+  mutate(perc = paste0(round(n * 100 / sum(n)), "%")) %>%
+  arrange(desc(n)) %>%
+ggplot(aes(x = n, y = reorder(region, n), fill = n)) +
+  geom_col() +
+  scale_fill_gradientn(colors = rev_palette[2:5], na.value = "white") +
+  geom_text(colour = "grey30", size = 2.7,
+             aes(label = n),
+             position=position_nudge(x = 6)) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal() + theme(legend.position = "null", aspect.ratio = 4/3)
+
+map <- 
+df %>% group_by(region) %>% summarize(n = n()) %>% 
+  full_join(shp, by = c("region" = "ADM1_UA")) %>%
+ggplot() +
+  geom_sf(aes(geometry = geometry, fill = n)) +
+  scale_fill_gradientn(colors = rev_palette[2:5], na.value = "white",
+                       name = "Кількість опитаних") +
+  theme_void() + 
+  #theme(plot.margin = margin(1, 1, 1, 1)) +
+  theme(aspect.ratio = 2/3) +
+  coord_sf(expand = T)
+
+
+(barn + theme(aspect.ratio = 4/5,
+              plot.margin = margin(0, 2.3, 0, 0, unit = "in"),
+              axis.text.x=element_blank())) +
+  inset_element(map, left = 0.2, bottom = -0.1, right = 1.5, top = 0.9)
+
+ggsave("charts/number-respondents-map.pdf", device=cairo_pdf, width = 8, height = 4)
+
+```
+
+
+```{r table refion n respondents}
+df %>% group_by(region) %>% summarize(n = n()) %>% 
+  mutate(perc = paste0(round(n * 100 / sum(n)), "%")) %>%
+  arrange(desc(n)) %>% 
+  rename("Регіон" = region, "Кількість опитаних" = n, "Відсоток опитаних" = perc) %>% 
+  write.table("charts/number-respondents-map.tsv", row.names = F, sep = "\t", quote = F)
+```
+
+
+```{r bars respondents info}
+plot_bar <- function(col, fill){
+  ggplot(df, aes(x = .data[[col]])) + 
+    geom_bar(stat = "count", fill = fill) +
+    #scale_fill_gradientn(colors = rev_palette) +
+    stat_count(geom = "text", colour = "grey30", size = 2.7,
+               aes(label = paste0(after_stat(count))),
+               #position=position_stack(vjust=1)) +
+               position=position_nudge(y = 40)) +
+    labs(x = NULL, y = NULL) +
+    theme_minimal(base_size = 12) + theme(legend.position = "none") +
+    ylim(0, 800) + coord_flip() 
+}
+#axis.text=element_text(size=6)
+
+cat <- plot_bar("category", "#EF7C12FF")
+pos <- plot_bar("position", "#F4B95AFF") +
+  scale_x_discrete(labels=c("Організатор охорони здоров’я" = "Організатор\nохорониздоров'я",
+                            "Керівник структурного підрозділу" = "Керівник\nпідрозділу"))
+deg <- plot_bar("degree", "#1BB6AFFF")
+spec <- plot_bar("spec", "#088BBEFF") +
+  scale_x_discrete(labels=c("Організатор охорони здоров’я" = "Організатор\nохорони здоров'я"))
+
+(spec + pos) /
+(cat + deg) +
+  plot_annotation(tag_levels = 'A')
+
+ggsave("charts/respondents-info-bars.pdf", device=cairo_pdf, width = 8, height = 4)
+```
+
+# Pies
+
+```{r pies Qs 12-17}
+plot_pie <- function(col){
+  col <- rlang::enquo(col) # capture the column as a quoted symbol
+  
+  df %>%
+    group_by(!!col) %>% # use `!!` to unquote the column
+    summarize(n = n()) %>% 
+    mutate(perc = round(n / sum(n) * 100),
+           textpos_y = cumsum(perc) - 0.5 * perc) %>% 
+    ggplot(aes(x = "", y = perc, fill = !!col)) + 
+    geom_bar(stat = "identity", width = 1) +
+    scale_fill_manual(values = palette, name = NULL) +
+    geom_text(aes(label = paste0(n, "\n", perc, "%")), size = 3,
+              position = position_stack(vjust = 0.5), color = "white") +
+    coord_polar(theta = "y", start = 0) +
+    theme_void()
+}
+
+q12 <- plot_pie(`12_gentest_aware`)
+q13 <- plot_pie(`13_pharmgen_aware`)
+q14 <- plot_pie(`14_genetics_aware`)
+q15 <- plot_pie(`15_gened`)
+q16 <- plot_pie(`16_persmed_info`)
+q17 <- plot_pie(`17_engage_colleague`)
+
+(q12 | q13 | q14) /
+(q15 | q16 | q17) +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "bottom")
+
+#ggsave("charts/pies_q12-17.pdf", device=cairo_pdf, width = 4, height = 6)
+```
+
+
+```{r pies Qs 21-23}
+q21 <- plot_pie(`21_persmed_initiative_aware`) +
+  scale_fill_manual(values = palette[c(2, 4, 5)], name = NULL)
+q22 <- plot_pie(`22_persmed_initiative_engage`) +
+  scale_fill_manual(values = palette[c(2, 4, 5)], name = NULL)
+q23 <- plot_pie(`23_persmed_training`) +
+  scale_fill_manual(values = palette[c(2, 4, 5)], name = NULL)
+
+free(q21 + theme(legend.position = "left")) /
+((q22 + theme(legend.position = "left")) | (q23 + theme(legend.position = "left"))) +
+  plot_annotation(tag_levels = 'A') +
+  plot_layout(design = design)
+#ggsave("charts/pies_q21-23.pdf", device=cairo_pdf, width = 8, height = 6)
+
+```
+
+# UpSet plots
+
+```{r 20_persmed_effect}
+split <- strsplit(df$`20_persmed_effect`, split=', ', fixed=TRUE)
+
+
+options20 <- c("Підвищення медичної ефективності спостереження за генетично зумовленими розладами",
+"Поліпшення використання ресурсів системи охорони здоров’я",
+"Зниження захворюваності в цілому серед населення",
+"Зниження поширеності генетичних розладів",
+"Підвищення соціальної ефективності спостереження за генетично зумовленими розладами",
+"Підвищення економічної ефективності спостереження за генетично зумовленими розладами")
+
+# Create a list where keys are unique elements and values are row indices
+upset_list <- lapply(options, function(el) which(sapply(split, function(row) el %in% row)))
+
+# Assign names to the list
+names(upset_list) <- LETTERS[1:6]
+
+# Print the list
+print(upset_list)
+
+m = make_comb_mat(upset_list)
+m_subset <- m[comb_size(m) >= 833*0.025]
+UpSet(m_subset, comb_order = order(comb_size(m_subset),decreasing = T))
+```
+
+# Bars multiple choice
+
+```{r fig.height=8, fig.width=8}
+n = nrow(df)
+
+plot_bar_mchoice <- function(col, fill, split = ", ", wrap_width = 80){
+  pull(df, col) %>% strsplit(split=split, fixed=TRUE) %>% unlist() %>% 
+    gsub("\\.$|,$", "", .) %>% table() %>% as.data.frame() %>% arrange(desc(Freq)) %>%
+    head(6) %>% filter(Freq > 1) %>% rename(Var1 = ".") %>%
+    mutate(perc = paste0(round(Freq / n * 100), "%"),
+           Var1 = str_wrap(Var1, width = wrap_width)) %>% 
+    ggplot(aes(x = Freq, y = reorder(Var1, Freq))) +
+      geom_col(fill = fill) +
+      geom_text(aes(label = perc), position = position_nudge(x = 30),
+                color = "grey30", size = 3) +
+      labs(x = NULL, y = NULL) +
+      theme_minimal(base_size = 10) +
+      theme(legend.position = "none") +
+      xlim(0, 750)
+}
+
+b18 <- plot_bar_mchoice("18_persmed_practice", "#EF7C12FF",
+                        split = "., ", wrap_width = 50)
+b19 <- plot_bar_mchoice("19_modern_priority", "#F4B95AFF", wrap_width = 50)
+b20 <- plot_bar_mchoice("20_persmed_effect", "#1BB6AFFF")
+b24 <- plot_bar_mchoice("24_persmed_barriers", "#088BBEFF")
+b25 <- plot_bar_mchoice("25_persmed_info_source", "#172869FF")
+
+b18 /
+b19 /
+b24 /
+b25 +
+  plot_annotation(tag_levels = "A") +
+  plot_layout(heights = c(7, 6, 5, 4),
+              axes = "collect")
+
+ggsave("charts/q18-19-24-25-bars.pdf", device=cairo_pdf, width = 8, height = 8)
+```
+
+```{r bar 20 & pie 26, fig.height=4, fig.width=8}
+
+b20 <- 
+  plot_bar_mchoice("20_persmed_effect", "#088BBEFF", wrap_width = 35)
+q26 <- 
+plot_pie(`26_persmed_costeffect`) + theme(legend.position = "left")
+
+b20 + q26 +
+  plot_layout(widths = c(3, 2))
+
+b20 + theme(plot.margin = margin(0, 1, 0, 0, unit = "in")) +
+  inset_element(q26, left = 0.5, bottom = 0, right = 1, top = 0.5)
+```
+
+# PCA
+```{r grade data}
+points_12_13_17 <- c("Так" = 2,
+             "Більше так, ніж ні" = 1,
+             "Не можу оцінити" = 0,
+             "Більше ні, ніж так"= -1,
+             "Ні" = -2)
+
+points_26 <- c("Надзвичайно позитивний" = 2,
+             "Позитивний" = 1,
+             "Нейтральний" = 0,
+             "Негативний" = -2)
+  
+points_22_23 <- c("Так" = 2,
+             "Не впевнений(-на)" = 0,
+             "Ні" = -2)
+
+graded <- 
+df %>% 
+  mutate(across(c(12, 13, 17), ~ as.numeric(points_12_13_17[.]))) %>% 
+  mutate(across(c(22, 23), ~ as.numeric(points_22_23[.]))) %>% 
+  mutate(across(c(26), ~ as.numeric(points_26[.]))) %>% 
+  select(where(is.double)) %>% 
+  select(-timestamp) %>% 
+  mutate_all(~replace(., is.na(.), 0))
+
+pcs <- prcomp(graded)
+
+as.data.frame(pcs$x[, 1:2]) %>% 
+  cbind(df[, 2:9]) %>% 
+  ggplot(aes(x = PC1, y = PC2, color = institution)) +
+  geom_point()
+
+pca_data %>% View()
+
+pca_data %>% cbind(df) %>% 
+  select('12_gentest_aware')
+
+df %>% 
+  select('12_gentest_aware')
+```
+
+as.numeric(points_121317[df$`12_gentest_aware`])
+
+for(col in df[c(12, 13, 17, 22, 23, 26)]){
+  print(levels(col))
+  print(" * * * ")
+}
+
+c(12, 13, 17, 22, 23, 26)
+
+# Boxplot
+
+```{r}
+top_regions <- 
+df %>% group_by(region) %>% summarise(n = n()) %>%
+  arrange(desc(n)) %>% head(10) %>% pull(region)
+
+graded %>% cbind(select(df, region)) %>% filter(region %in% top_regions) %>% 
+  rowwise() %>%
+  mutate(tot = sum(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  ungroup() %>% 
+  ggplot(aes(x = tot, y = region, fill = region)) + 
+  geom_boxplot()
+```
+
+```{r bars by regions}
+df %>% 
+  group_by(region, `12_gentest_aware`) %>%
+  summarize (n = n()) %>% 
+  group_by(region) %>% 
+  mutate(frac_yes = sum(n[`12_gentest_aware`=="Так"])/sum(n)) %>% 
+  ggplot(aes(y = reorder(region, frac_yes), x = n, fill = `12_gentest_aware`)) +
+  geom_bar(position="fill", stat="identity") +
+  scale_fill_manual(values = palette, name = NULL) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal(base_size = 10)
+```
+
+```{r fig.height=5, fig.width=8}
+plot_percent <- function(col, pal = palette, pos = "Так"){
+   col <- rlang::enquo(col)
+  df %>%
+    group_by(region, !!col) %>%
+    summarize(n = n(), .groups = "drop") %>%
+    group_by(region) %>%
+    mutate(percent = round(n / sum(n) * 100),
+           frac_pos = sum(n[!!col==pos])/sum(n)) %>% 
+    ggplot(aes(y = reorder(region, frac_pos), x = n, fill = !!col)) +
+    geom_bar(position = "fill", stat = "identity") +
+    scale_fill_manual(values = pal, name = NULL) +
+    labs(x = NULL, y = NULL) +
+    theme_minimal(base_size = 10) +
+    theme(axis.text.x = element_blank()) +  # Remove x-axis tick labels
+    geom_text(
+      aes(
+        label = ifelse(percent > 15, paste0(round(percent, 1), "%"), ""),
+        group = !!col
+      ),
+      position = position_fill(vjust = 0.5),
+      size = 3, color = "white", fontface = "bold"
+    )
+  
+}
+
+perc12 <- plot_percent(`12_gentest_aware`)
+perc13 <- plot_percent(`13_pharmgen_aware`)
+perc17 <- plot_percent(`17_engage_colleague`)
+perc22 <- plot_percent(`22_persmed_initiative_engage`,pal = palette[c(2, 4, 5)])
+perc23 <- plot_percent(`23_persmed_training`, pal = palette[c(2, 4, 5)])
+perc26 <- plot_percent(`26_persmed_costeffect`, pal = palette[c(2, 4, 5, 6)],
+                       pos = "Надзвичайно позитивний")
+
+(perc12 + perc13 + perc17) + plot_layout(axes = "collect", guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = 'bottom')
+
+ggsave("charts/q12-13-17-percent-bars.pdf", device=cairo_pdf, width = 8, height = 5)
+```
+
+```{r fig.height=8, fig.width=8}
+(perc22 | perc23) /
+  (perc26) + 
+  plot_layout(axes = "collect", guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = 'right')
+ggsave("charts/q22-23-26-percent-bars.pdf", device=cairo_pdf, width = 8, height = 8)
+```
+
